@@ -2,11 +2,9 @@
 
 # Shared helpers for the examples.
 #
-# The Ruby SDK 0.1.0 speaks the Connect services it ships bindings for
-# (instance, live, tables). Collections, hybrid query and SQL are on the engine's
-# native JSON API, so the examples reach those through this small Net::HTTP
-# wrapper, and use the SDK for what it covers. No credentials: a local
-# `loams dev` has auth off. Set LOAMS_API_KEY for an instance that needs one.
+# These examples demonstrate native JSON routes alongside the SDK. The SDK also
+# provides app modules, builders, collection handles, SQL and streams.
+# Set LOAMS_API_KEY for an instance that needs authentication.
 require "json"
 require "net/http"
 require "uri"
@@ -14,7 +12,7 @@ require "loams"
 
 module LoamsExamples
   extend self
-  ENDPOINT = ENV.fetch("LOAMS_ENDPOINT", "http://127.0.0.1:18080")
+  ENDPOINT = ENV.fetch("LOAMS_ENDPOINT", "http://127.0.0.1:8080")
   NAMESPACE = ENV.fetch("LOAMS_NAMESPACE", "examples-ruby")
 
   class ApiError < StandardError

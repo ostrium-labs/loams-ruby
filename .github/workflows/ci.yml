@@ -10,7 +10,7 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
-          bundler-cache: true
+      - run: bundle install
       - name: Syntax check every example
         run: |
           for f in lib/*.rb examples/*/*.rb; do bundle exec ruby -c "$f"; done
