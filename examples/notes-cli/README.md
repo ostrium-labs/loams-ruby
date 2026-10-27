@@ -1,6 +1,6 @@
 # notes-cli
 
-A plain Ruby script: `add`, `search` (hybrid, filtered by `--tenant`) and `count`. Text is hashed into an 8-dimension vector so it needs no embedding model; replace `embed` with a real one for real use.
+A plain Ruby script using SDK namespace, collection, document, search and SQL modules for `add`, `search` and `count`. Text is hashed into an 8-dimensional vector, so it needs no embedding model; replace it with a real one for real use.
 
 ```sh
 bundle exec ruby examples/notes-cli/notes.rb add "refund policy" --tenant acme

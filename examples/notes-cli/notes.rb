@@ -1,30 +1,13 @@
 # frozen_string_literal: true
 
-# A tiny notes search CLI: a plain Ruby script, no framework.
+# A tiny notes CLI backed by SDK namespace, collection, document, search and SQL modules.
 #
-#   ruby examples/notes-cli/notes.rb add "refund policy for annual plans" --tenant acme
+#   ruby examples/notes-cli/notes.rb add "refund policy" --tenant acme
 #   ruby examples/notes-cli/notes.rb search refund --tenant acme
 #   ruby examples/notes-cli/notes.rb count
-#
-# There is no embedding model here: text is hashed into an 8-dimension
-# bag-of-words vector so the example runs with nothing else installed. Swap
-# `embed` for a real model and raise DIM to match.
-$LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "digest"
 require "optparse"
-require "loams_rest"
-
-include LoamsExamples
-
-DIM = 8
-COLLECTION = "notes"
-
-def embed(text)
-  vec = Array.new(DIM, 0.0)
-  text.downcase.scan(/\w+/).each { |w| vec[Digest::MD5.digest(w).unpack1("C") % DIM] += 1.0 }
-  vec[0] = 1.0 if vec.all?(&:zero?) # cosine needs a non-zero vector
-  vec
-end
+require_relative "../../lib/example_support"
 
 def usage
   warn "usage: notes.rb add TEXT [--tenant T] | search QUERY [--tenant T] | count"
@@ -32,37 +15,33 @@ def usage
 end
 
 tenant = "default"
-OptionParser.new { |o| o.on("--tenant T") { |t| tenant = t } }.parse!(ARGV)
-cmd = ARGV.shift or usage
+OptionParser.new { |opts| opts.on("--tenant T") { |value| tenant = value } }.parse!(ARGV)
+command = ARGV.shift || usage
+client = LoamsExample.client
+notes = LoamsExample.ensure_collection(client, "notes")
 
-create_collection(COLLECTION, schema(dim: DIM))
-
-case cmd
+case command
 when "add"
   text = ARGV.join(" ")
   usage if text.empty?
-  id = Digest::MD5.hexdigest("#{tenant}:#{text}")[0, 12].to_i(16)
-  api(:post, "/collections/#{COLLECTION}/documents", { ops: [
-    { upsert: { id: id, source: { body: text, tenant: tenant }, vectors: { embedding: embed(text) } } }
-  ] })
+  id = Digest::MD5.hexdigest("#{tenant}:#{text}")[0, 12]
+  notes.upsert([{ id: id, source: { body: text, tenant: tenant }, vectors: { embedding: LoamsExample.embed(text) } }])
   puts "saved note #{id} for tenant #{tenant}"
 when "search"
-  q = ARGV.join(" ")
-  usage if q.empty?
-  res = api(:post, "/query", {
-    from: "collections.#{COLLECTION}",
-    retrieve: [
-      { vector: { field: "embedding", query: embed(q), k: 10 } },
-      { text: { field: "body", query: q, k: 10 } }
-    ],
-    filter: { term: { tenant: tenant } },
-    fuse: { method: "rrf", k: 60 },
-    limit: 5
-  })
-  puts JSON.pretty_generate(res)
+  query = ARGV.join(" ")
+  usage if query.empty?
+  request = Loams::Search.on("notes")
+    .text(query, fields: ["body"])
+    .vector("embedding", LoamsExample.embed(query))
+    .fuse(Loams::Fusion.rrf(60))
+    .filter(Loams::Filter.eq("tenant", tenant))
+    .limit(5)
+  notes.search(request).hits.each do |hit|
+    puts "#{Loams::Values.from_document_id(hit.pk)}: #{Loams.to_h(hit.source)["body"]}"
+  end
 when "count"
-  res = api(:post, "/sql", { query: "SELECT count(*) AS n FROM #{COLLECTION}" })
-  puts "#{res['rows'].dig(0, 0)} notes"
+  result = client.sql.query("SELECT count(*) AS n FROM notes")
+  puts "#{Loams::App::Sql.records(result).first["n"]} notes"
 else
   usage
 end

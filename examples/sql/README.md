@@ -1,6 +1,7 @@
 # sql
 
-Runs `SELECT` over the `kb` collection, then the hybrid query as SQL with `rrf(vector_search(...), text_search(...))`.
+Runs aggregate and parameterized SQL through the SDK's `sql` module, plus hybrid retrieval
+with `rrf(vector_search(...), text_search(...))`.
 
 ```sh
 bundle exec ruby examples/sql/sql.rb
