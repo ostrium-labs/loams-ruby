@@ -14,5 +14,5 @@ jobs:
       - name: Syntax check every example
         run: |
           for f in lib/*.rb examples/*/*.rb; do bundle exec ruby -c "$f"; done
-      - name: Load the SDK and the helper
-        run: bundle exec ruby -Ilib -e 'require "loams_rest"; puts Loams::VERSION'
+      - name: Load the SDK and shared example support
+        run: bundle exec ruby -Ilib -e 'require "example_support"; puts Loams::VERSION'

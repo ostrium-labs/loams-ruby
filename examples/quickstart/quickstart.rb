@@ -1,33 +1,47 @@
 # frozen_string_literal: true
 
-# Connect, create a collection, upsert documents, run a hybrid search
-# (vector + BM25 + filter) and print the results.
-$LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
-require "loams_rest"
+# Connect, create a namespace and collection, write documents, then use SDK modules.
+require_relative "../../lib/example_support"
 
-include LoamsExamples
+client = LoamsExample.client
+instance = Loams.to_h(client.instance.get_instance)
+puts "engine API versions: #{instance[:api_versions] || instance["api_versions"]}"
+articles = LoamsExample.seed(client, "articles")
+query = Loams::Search.on("articles")
+  .text("refund", fields: ["body"])
+  .vector("embedding", LoamsExample.embed("refund policy"))
+  .fuse(Loams::Fusion.rrf(60))
+  .filter(Loams::Filter.eq("tenant", "a"))
+  .limit(3)
 
-info = sdk_client.instance.get_instance
-puts "connected to #{info.name} #{info.server_version} (#{info.edition}) at #{ENDPOINT}"
-puts "namespace: #{NAMESPACE}"
+puts "text search: #{articles.search(Loams::Search.on("articles").text("refund", fields: ["body"]).limit(3)).hits.length} hits"
+puts "vector search: #{client.vector.search("articles", LoamsExample.embed("refund policy"), field: "embedding", limit: 3).hits.length} hits"
+client.search.query(query).hits.each do |hit|
+  puts "#{Loams::Values.from_document_id(hit.pk)}: #{Loams.to_h(hit.source)["body"]} (#{hit.score.round(3)})"
+end
 
-create_collection("kb", schema(dim: 3))
+begin
+  client.graph.create("examples_graph")
+  client.graph.query("examples_graph", "INSERT (:Article {id: $id})", parameters: { id: 1 })
+  rows = client.graph.query("examples_graph", "MATCH (a:Article) RETURN a.id", read_only: true)
+  puts "experimental graph rows: #{Loams::App::Graph.records(rows).length}"
+rescue Loams::FeatureNotInVariantError
+  puts "graph is not enabled in this engine build"
+end
 
-api(:post, "/collections/kb/documents", { ops: [
-  { upsert: { id: 1, source: { body: "refund policy", tenant: "a" }, vectors: { embedding: [1.0, 0.0, 0.0] } } },
-  { upsert: { id: 2, source: { body: "shipping times", tenant: "a" }, vectors: { embedding: [0.9, 0.1, 0.0] } } },
-  { upsert: { id: 3, source: { body: "refund window", tenant: "b" }, vectors: { embedding: [0.0, 0.0, 1.0] } } }
-] })
+stream = "example_events"
+client.streams.create(stream, partitions: 1)
+produced = client.streams.produce(stream, [{ kind: "indexed", id: 1 }], producer_id: "ruby-example", producer_seq: 1)
+subscription = client.streams.subscribe(stream, from_offset: produced.base_offset, max_wait_ms: 100)
+subscription.each do |event|
+  puts "stream event at offset #{event.offset}: #{event.json}"
+  subscription.cancel
+end
 
-result = api(:post, "/query", {
-  from: "collections.kb",
-  retrieve: [
-    { vector: { field: "embedding", query: [1.0, 0.0, 0.0], k: 10 } },
-    { text: { field: "body", query: "refund", k: 10 } }
-  ],
-  filter: { term: { tenant: "a" } },
-  fuse: { method: "rrf", k: 60 },
-  limit: 3
-})
+# Explicit opt-in, read-only, and may require Live directory privileges.
+if ARGV.include?("--live-admin")
+  raise "this server does not serve live.admin" unless instance.fetch(:api_versions, instance["api_versions"]).to_a.include?("loams.live.v1")
 
-puts JSON.pretty_generate(result)
+  apps = Loams.to_h(client.module("live.admin").list_apps)
+  puts "Live apps visible to this credential: #{(apps[:apps] || apps["apps"] || []).length}"
+end

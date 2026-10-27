@@ -1,30 +1,18 @@
 # frozen_string_literal: true
 
-# SQL over a collection: plain SELECT, then the same hybrid query as the
-# quickstart written with rrf(vector_search(...), text_search(...)).
-$LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
-require "loams_rest"
+# SQL through the SDK module, including parameters and hybrid search functions.
+require_relative "../../lib/example_support"
 
-include LoamsExamples
+client = LoamsExample.client
+LoamsExample.seed(client, "articles")
 
-create_collection("kb", schema(dim: 3))
-api(:post, "/collections/kb/documents", { ops: [
-  { upsert: { id: 1, source: { body: "refund policy", tenant: "a" }, vectors: { embedding: [1.0, 0.0, 0.0] } } },
-  { upsert: { id: 2, source: { body: "shipping times", tenant: "a" }, vectors: { embedding: [0.9, 0.1, 0.0] } } },
-  { upsert: { id: 3, source: { body: "refund window", tenant: "b" }, vectors: { embedding: [0.0, 0.0, 1.0] } } }
-] })
-
-def run_sql(title, query)
-  res = LoamsExamples.api(:post, "/sql", { query: query })
-  puts "-- #{title}", query
-  cols = res["columns"].map { |c| c["name"] }
-  puts cols.join("\t")
-  res["rows"].each { |row| puts row.join("\t") }
-  puts
+def run_sql(client, label, sql, params: [])
+  puts "-- #{label}"
+  Loams::App::Sql.records(client.sql.query(sql, params: params)).each { |row| puts row }
 end
 
-run_sql("all documents", "SELECT _id, body, tenant FROM kb ORDER BY _id")
-run_sql("hybrid search with rrf",
-        "SELECT _id, body, _score FROM rrf(" \
-        "vector_search('kb', [1.0, 0.0, 0.0], 'embedding', 10), " \
-        "text_search('kb', 'refund', 'body', 10)) LIMIT 3")
+run_sql(client, "group by", "SELECT tenant, count(*) AS n FROM articles GROUP BY tenant ORDER BY tenant")
+run_sql(client, "parameterized select", "SELECT body, year FROM articles WHERE year >= $1 ORDER BY year", params: [2024])
+run_sql(client, "hybrid search", "SELECT _id, _score FROM rrf(" \
+  "vector_search('articles', $1, 'embedding', 10), text_search('articles', 'refund', 'body', 10)) LIMIT 3",
+  params: [LoamsExample.embed("refund policy")])
